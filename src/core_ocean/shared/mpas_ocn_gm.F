@@ -202,6 +202,9 @@ contains
       call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
       call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
 
+      nCells = nCellsArray(size(nCellsArray))
+      nEdges = nEdgesArray(size(nEdgesArray))
+
       !$omp master
       allocate(gradDensityEdge(nVertLevels, nEdges), &
                dzdxEdge(nVertLevels, nEdges), &
@@ -213,9 +216,6 @@ contains
       allocate (tridiagA(nVertLevels))
       allocate (tridiagB(nVertLevels))
       allocate (tridiagC(nVertLevels))
-
-      nCells = nCellsArray(size(nCellsArray))
-      nEdges = nEdgesArray(size(nEdgesArray))
 
       !$omp do schedule(runtime) private(k)
       do iEdge = 1, nEdges
