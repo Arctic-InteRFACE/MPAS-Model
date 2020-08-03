@@ -51,6 +51,24 @@ module ocn_gm
    logical :: local_config_GM_kappa_lat_depth_variable
    real(kind=RKIND), parameter :: local_config_GM_min_phase_speed = 0.1_RKIND
    real(kind=RKIND) :: slopeTaperFactor, sfcTaperFactor, rediGMinitValue
+
+   !--------------------------------------------------------------------                                          
+   !                                                                                                              
+   ! Replace calls to mpas_allocate_scratch_Field with straight allocates.                                        
+   ! These variables were moved from the subroutines, but will be moved back once the                             
+   ! threading implementation is changed to more localized threading                                              
+   !                                                                                                              
+   !--------------------------------------------------------------------
+   ! gradDensityEdge: Normal gradient of density
+   !           units: none
+   real(kind=RKIND), dimension(:, :), pointer :: gradDensityEdge
+   ! drhoDzTopOfEdge: Gradient of density in vertical on edges
+   !           units: None
+   real(kind=RKIND), dimension(:, :), pointer :: drhoDzTopOfEdge
+   ! dzdxEdge: Gradient of depth at constant cell indes
+   !    units: None
+   real(kind=RKIND), dimension(:, :), pointer :: dzdxEdge
+
 !***********************************************************************
 
 contains
@@ -102,7 +120,7 @@ contains
       !-----------------------------------------------------------------
 
       real(kind=RKIND), dimension(:, :), pointer :: density, displacedDensity, zMid, normalGMBolusVelocity, &
-                                                    layerThicknessEdge, gradDensityEdge, drhoDzTopOfEdge, dzdxEdge, &
+                                                    layerThicknessEdge, &
                                                     k33, gmStreamFuncTopOfEdge, BruntVaisalaFreqTop, gmStreamFuncTopOfCell, &
                                                     layerThickness, inSituThermalExpansionCoeff, &
                                                     inSituSalineContractionCoeff, RediKappaScaling, gmKappaScaling, RediKappaSfcTaper, &
@@ -126,8 +144,6 @@ contains
       integer :: nsmooth, nCells, nEdges
       integer, pointer :: nVertLevels
       integer, dimension(:), pointer :: nCellsArray, nEdgesArray
-
-      type(field2DReal), pointer :: gradDensityEdgeField, drhoDzTopOfEdgeField, dzdxEdgeField
 
       type(mpas_pool_type), pointer :: tracersPool
       real(kind=RKIND), dimension(:, :, :), pointer :: activeTracers
@@ -186,26 +202,20 @@ contains
       call mpas_pool_get_dimension(meshPool, 'nCellsArray', nCellsArray)
       call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLevels)
 
-      call mpas_pool_get_field(scratchPool, 'gradDensityEdge', gradDensityEdgeField)
-      call mpas_allocate_scratch_field(gradDensityEdgeField, .True., .false.)
+      nCells = nCellsArray(size(nCellsArray))
+      nEdges = nEdgesArray(size(nEdgesArray))
 
-      call mpas_pool_get_field(scratchPool, 'dzdxEdge', dzdxEdgeField)
-      call mpas_allocate_scratch_field(dzdxEdgeField, .True., .false.)
-
-      call mpas_pool_get_field(scratchPool, 'drhoDzTopOfEdge', drhoDzTopOfEdgeField)
-      call mpas_allocate_scratch_field(drhoDzTopOfEdgeField, .True., .false.)
-
-      drhoDzTopOfEdge => drhoDzTopOfEdgeField%array
-      dzdxEdge => dzdxEdgeField%array
-      gradDensityEdge => gradDensityEdgeField%array
+      !$omp master
+      allocate(gradDensityEdge(nVertLevels, nEdges), &
+               dzdxEdge(nVertLevels, nEdges), &
+               drhoDzTopOfEdge(nVertLevels, nEdges))
+      !$omp end master
+      !$omp barrier
 
       allocate (rightHandSide(nVertLevels))
       allocate (tridiagA(nVertLevels))
       allocate (tridiagB(nVertLevels))
       allocate (tridiagC(nVertLevels))
-
-      nCells = nCellsArray(size(nCellsArray))
-      nEdges = nEdgesArray(size(nEdgesArray))
 
       !$omp do schedule(runtime) private(k)
       do iEdge = 1, nEdges
@@ -728,9 +738,12 @@ contains
       end if !end config_use_GM
 
       ! Deallocate scratch variables
-      call mpas_deallocate_scratch_field(dzdxEdgeField, .true.)
-      call mpas_deallocate_scratch_field(drhoDzTopOfEdgeField, .true.)
-      call mpas_deallocate_scratch_field(gradDensityEdgeField, .true.)
+      !$omp barrier
+      !$omp master
+      deallocate(dzdxEdge, &
+                 drhoDzTopOfEdge, &
+                 gradDensityEdge)
+      !$omp end master
       call mpas_timer_stop('gm bolus velocity')
 
    end subroutine ocn_GM_compute_Bolus_velocity!}}}
